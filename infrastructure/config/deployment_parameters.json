@@ -1,0 +1,45 @@
+{
+    "monitoring-sns-topics": {
+        "Environment": "dev"
+    },
+    "monitoring-scheduled-jobs": {
+        "Environment": "dev"
+    },
+    "monitoring-lambda-functions": {
+        "Environment": "dev",
+        "CostAlertTopicArn": "arn:aws:sns:us-west-2:954976299892:cost-optimization-alerts-dev",
+        "ReplicationTestTopicArn": "arn:aws:sns:us-west-2:954976299892:replication-test-alerts-dev",
+        "DisasterRecoveryTopicArn": "arn:aws:sns:us-west-2:954976299892:disaster-recovery-alerts-dev"
+    },
+    "network-stack": {
+        "Environment": "dev"
+    },
+    "route53-stack": {
+        "Environment": "dev"
+    },
+    "storage-stack": {
+        "Environment": "dev"
+    },
+    "database-stack": {
+        "DatabaseUsername": "dbadmin",
+        "DatabasePassword": "SecurePassword123!"
+    },
+    "microservices-stack": {
+        "MicroserviceImageUri": "954976299892.dkr.ecr.us-west-2.amazonaws.com/microservice-repo:latest"
+    },
+    "frontend-stack": {
+        "Environment": "dev"
+    },
+    "jenkins-pipeline": {
+        "Environment": "dev"
+    },
+    "disaster-recovery-stack": {
+        "Environment": "dev"
+    },
+    "monitoring-stack": {
+        "Environment": "dev"
+    },
+    "storage-monitoring": {
+        "StorageBucketName": "microservice-storage-monitoring-dev"
+    }
+}

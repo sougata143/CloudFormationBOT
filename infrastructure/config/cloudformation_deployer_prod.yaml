@@ -1,0 +1,10 @@
+global:
+  default_region: us-east-2
+  stack_prefix: microservice-prod
+
+logging:
+  level: WARNING
+  console_output: false
+
+deployment:
+  interactive_mode: false

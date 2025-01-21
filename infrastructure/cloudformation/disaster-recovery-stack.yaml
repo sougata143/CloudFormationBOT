@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Disaster Recovery and Backup Strategy'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: MicroserviceEnv
+
+Resources:
+  # S3 Backup Bucket
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${EnvironmentName}-disaster-recovery-backup
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Transitions:
+              - StorageClass: Glacier
+                TransitionInDays: 30
+
+  # RDS Backup Vault
+  RDSBackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub ${EnvironmentName}-RDS-Backup-Vault
+      EncryptionKeyArn: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-KMSKeyArn
+
+  # Backup Plan for RDS
+  RDSBackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub ${EnvironmentName}-RDS-Backup-Plan
+        Rules:
+          - RuleName: DailyBackups
+            TargetBackupVault: !Ref RDSBackupVault
+            ScheduleExpression: cron(0 5 ? * * *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 120
+            Lifecycle:
+              DeleteAfterDays: 35
+
+  # Cross-Region Replication for S3
+  S3ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetReplicationConfiguration
+                  - s3:ListBucket
+                Resource: !GetAtt BackupBucket.Arn
+
+Outputs:
+  BackupBucketName:
+    Description: Disaster Recovery Backup Bucket
+    Value: !Ref BackupBucket
+
+  RDSBackupVaultName:
+    Description: RDS Backup Vault Name
+    Value: !Ref RDSBackupVault

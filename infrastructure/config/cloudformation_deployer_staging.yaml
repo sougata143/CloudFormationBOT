@@ -1,0 +1,10 @@
+global:
+  default_region: us-east-1
+  stack_prefix: microservice-staging
+
+logging:
+  level: INFO
+  console_output: true
+
+deployment:
+  interactive_mode: false

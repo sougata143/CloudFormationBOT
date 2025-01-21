@@ -1,0 +1,58 @@
+{
+    "password_policy": {
+        "minimum_length": 14,
+        "require_uppercase": true,
+        "require_lowercase": true,
+        "require_numbers": true,
+        "require_symbols": true,
+        "max_password_age_days": 90,
+        "prevent_password_reuse": 24
+    },
+    "access_key_rotation": {
+        "max_key_age_days": 90
+    },
+    "mfa_requirements": {
+        "enforce_for_console_access": true,
+        "enforce_for_api_access": true
+    },
+    "restricted_regions": [
+        "us-west-1", 
+        "ap-northeast-1"
+    ],
+    "prohibited_actions": [
+        "iam:CreateAccessKey",
+        "iam:CreateUser",
+        "iam:DeleteUser"
+    ],
+    "security_groups": {
+        "allowed_ports": [
+            22,
+            80,
+            443,
+            3306,
+            5432
+        ],
+        "blocked_cidrs": [
+            "0.0.0.0/0"
+        ]
+    },
+    "encryption_requirements": {
+        "minimum_key_length": 2048,
+        "required_encryption_services": [
+            "s3",
+            "rds",
+            "dynamodb",
+            "ebs"
+        ]
+    },
+    "audit_logging": {
+        "cloudtrail_enabled": true,
+        "log_retention_days": 365,
+        "monitor_management_events": true,
+        "monitor_data_events": true
+    },
+    "network_security": {
+        "vpc_flow_logs_enabled": true,
+        "default_deny_policy": true
+    }
+}

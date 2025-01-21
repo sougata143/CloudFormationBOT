@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Route53 DNS Routing and Health Check Configuration'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: MicroserviceEnv
+
+  RootDomainName:
+    Description: Root domain name for the application
+    Type: String
+    Default: yourdomain.com
+
+  SubdomainPrefix:
+    Description: Subdomain prefix for microservice
+    Type: String
+    Default: app
+
+Resources:
+  # Route53 Hosted Zone
+  MicroserviceHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref RootDomainName
+
+  # Frontend Domain Record
+  FrontendDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Sub ${RootDomainName}.
+      Name: !Sub ${SubdomainPrefix}.${RootDomainName}.
+      Type: A
+      AliasTarget:
+        HostedZoneId: 
+          Fn::ImportValue: !Sub ${EnvironmentName}-CloudFrontDistributionZoneId
+        DNSName: 
+          Fn::ImportValue: !Sub ${EnvironmentName}-CloudFrontDomainName
+
+  # Microservice Domain Record
+  MicroserviceDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Sub ${RootDomainName}.
+      Name: !Sub api.${RootDomainName}.
+      Type: A
+      AliasTarget:
+        HostedZoneId: 
+          Fn::ImportValue: !Sub ${EnvironmentName}-ALBCanonicalHostedZoneID
+        DNSName: 
+          Fn::ImportValue: !Sub ${EnvironmentName}-MicroserviceEndpoint
+
+  # Health Check for Frontend
+  FrontendHealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig:
+        Type: HTTPS
+        FullyQualifiedDomainName: !Sub ${SubdomainPrefix}.${RootDomainName}
+        Port: 443
+        ResourcePath: /
+        RequestInterval: 30
+        FailureThreshold: 3
+      HealthCheckTags:
+        - Key: Name
+          Value: Frontend Health Check
+
+  # Health Check for Microservice
+  MicroserviceHealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig:
+        Type: HTTPS
+        FullyQualifiedDomainName: !Sub api.${RootDomainName}
+        Port: 443
+        ResourcePath: /actuator/health
+        RequestInterval: 30
+        FailureThreshold: 3
+      HealthCheckTags:
+        - Key: Name
+          Value: Microservice Health Check
+
+Outputs:
+  FrontendDomain:
+    Description: Frontend Domain Name
+    Value: !Ref FrontendDomainRecord
+    Export:
+      Name: !Sub ${EnvironmentName}-FrontendDomain
+
+  MicroserviceDomain:
+    Description: Microservice Domain Name
+    Value: !Ref MicroserviceDomainRecord
+    Export:
+      Name: !Sub ${EnvironmentName}-MicroserviceDomain

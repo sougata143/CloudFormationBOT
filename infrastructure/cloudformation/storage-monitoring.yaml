@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudWatch Alarms for S3 Storage Monitoring'
+
+Parameters:
+  StorageBucketName:
+    Type: String
+    Description: Name of the S3 bucket to monitor
+
+Resources:
+  # Bucket Size Alarm
+  BucketSizeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${StorageBucketName}-Size-Alarm'
+      MetricName: BucketSizeBytes
+      Namespace: AWS/S3
+      Statistic: Maximum
+      Period: 86400  # Daily check
+      EvaluationPeriods: 1
+      Threshold: 10737418240  # 10 GB
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: BucketName
+          Value: !Ref StorageBucketName
+        - Name: StorageType
+          Value: StandardStorage
+
+  # Replication Failure Alarm
+  ReplicationFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${StorageBucketName}-Replication-Failure-Alarm'
+      MetricName: ReplicationLatency
+      Namespace: AWS/S3
+      Statistic: Maximum
+      Period: 3600  # Hourly check
+      EvaluationPeriods: 1
+      Threshold: 3600  # 1 hour
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: BucketName
+          Value: !Ref StorageBucketName

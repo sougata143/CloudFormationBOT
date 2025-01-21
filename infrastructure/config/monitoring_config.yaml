@@ -1,0 +1,109 @@
+# Monitoring Configuration
+
+# Global Monitoring Settings
+global:
+  environment: dev
+  enabled: true
+  log_level: INFO
+
+# Notification Channels
+notifications:
+  # Email Notifications
+  email_endpoints:
+    - admin@company.com
+    - devops@company.com
+  
+  # Slack Webhook Notifications
+  slack:
+    enabled: true
+    webhooks:
+      cost_alerts: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX'
+      replication_alerts: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX'
+      disaster_recovery: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX'
+  
+  # PagerDuty Integration
+  pagerduty:
+    enabled: false
+    service_key: 'your_pagerduty_service_integration_key'
+
+# Cost Optimization Alerts
+cost_optimization:
+  daily_threshold: 100  # USD
+  monthly_threshold: 3000  # USD
+  alert_levels:
+    - threshold: 50  # Soft warning
+      severity: warning
+    - threshold: 100  # Hard limit
+      severity: critical
+
+# Replication Monitoring
+replication_monitoring:
+  test_frequency: 
+    hourly: true
+    daily: false
+  
+  failure_thresholds:
+    consecutive_failures: 3
+    replication_latency_seconds: 3600  # 1 hour
+
+# Disaster Recovery Configuration
+disaster_recovery:
+  backup_frequency:
+    daily: true
+    weekly: false
+  
+  retention_policy:
+    daily_backups: 7
+    weekly_backups: 4
+    monthly_backups: 3
+
+# Granular Alerting Configuration
+alert_rules:
+  # S3 Bucket Size Alerts
+  s3_bucket_size:
+    warning_threshold_gb: 100
+    critical_threshold_gb: 500
+  
+  # Replication Latency Alerts
+  replication_latency:
+    warning_threshold_seconds: 1800  # 30 minutes
+    critical_threshold_seconds: 3600  # 1 hour
+  
+  # Cost Anomaly Detection
+  cost_anomaly:
+    enabled: true
+    detection_sensitivity: medium
+    consecutive_anomaly_threshold: 3
+
+# Monitoring Dashboard Configuration
+dashboard:
+  cloudwatch:
+    enabled: true
+    widgets:
+      - name: CostOptimizationWidget
+        type: metric
+        metrics:
+          - namespace: AWS/Billing
+            metric_name: EstimatedCharges
+      
+      - name: S3ReplicationWidget
+        type: metric
+        metrics:
+          - namespace: AWS/S3
+            metric_name: ReplicationLatency
+      
+      - name: DisasterRecoveryWidget
+        type: metric
+        metrics:
+          - namespace: AWS/Lambda
+            metric_name: Duration
+
+# External Monitoring Service Integration
+external_monitoring:
+  datadog:
+    enabled: false
+    api_key: 'your_datadog_api_key'
+  
+  new_relic:
+    enabled: false
+    license_key: 'your_new_relic_license_key'

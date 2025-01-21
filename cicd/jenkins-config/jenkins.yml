@@ -1,0 +1,33 @@
+jenkins:
+  systemMessage: "CloudFormation Microservices CI/CD Pipeline"
+  
+  clouds:
+    - docker:
+        name: "docker"
+        dockerApi:
+          url: "unix:///var/run/docker.sock"
+  
+  credentials:
+    system:
+      domainCredentials:
+        - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: docker-hub-credentials
+              username: ${DOCKER_USERNAME}
+              password: ${DOCKER_PASSWORD}
+          - usernamePassword:
+              scope: GLOBAL
+              id: aws-credentials
+              username: ${AWS_ACCESS_KEY_ID}
+              password: ${AWS_SECRET_ACCESS_KEY}
+
+  jobs:
+    - script: >
+        pipelineJob('microservice-deployment') {
+          definition {
+            cps {
+              script(readFileFromWorkspace('cicd/jenkins-config/Jenkinsfile'))
+            }
+          }
+        }

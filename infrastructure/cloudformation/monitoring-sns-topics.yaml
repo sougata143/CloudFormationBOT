@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SNS Topics for Monitoring and Alerting'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+
+Resources:
+  # Cost Optimization Alert Topic
+  CostOptimizationAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'cost-optimization-alerts-${Environment}'
+      DisplayName: !Sub 'Cost Optimization Alerts for ${Environment}'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: CostOptimization
+
+  # Replication Test Alert Topic  
+  ReplicationTestAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'replication-test-alerts-${Environment}'
+      DisplayName: !Sub 'S3 Replication Test Alerts for ${Environment}'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: S3Replication
+
+  # Disaster Recovery Alert Topic
+  DisasterRecoveryAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'disaster-recovery-alerts-${Environment}'
+      DisplayName: !Sub 'Disaster Recovery Alerts for ${Environment}'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: DisasterRecovery
+
+Outputs:
+  CostOptimizationAlertTopicArn:
+    Description: ARN of Cost Optimization Alert Topic
+    Value: !Ref CostOptimizationAlertTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-CostOptimizationAlertTopicArn'
+
+  ReplicationTestAlertTopicArn:
+    Description: ARN of Replication Test Alert Topic
+    Value: !Ref ReplicationTestAlertTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-ReplicationTestAlertTopicArn'
+
+  DisasterRecoveryAlertTopicArn:
+    Description: ARN of Disaster Recovery Alert Topic
+    Value: !Ref DisasterRecoveryAlertTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-DisasterRecoveryAlertTopicArn'

@@ -1,0 +1,76 @@
+# CloudFormation Deployer Configuration
+
+# Global Deployment Settings
+global:
+  default_region: us-west-2
+  stack_prefix: microservice
+  infrastructure_dir: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/cloudformation
+
+# Logging Configuration
+logging:
+  level: INFO
+  directory: logs
+  filename_format: cloudformation_deploy_{timestamp}.log
+  console_output: true
+  rotation:
+    max_files: 10
+    max_file_size_mb: 50
+  log_levels:
+    boto3: WARNING
+    botocore: WARNING
+    urllib3: WARNING
+  structured_logging:
+    enabled: true
+    format: json
+
+# Deployment Modes
+deployment:
+  interactive_mode: true
+  default_environment: dev
+  supported_environments:
+    - dev
+    - staging
+    - prod
+
+# Validation Settings
+validation:
+  enabled: true
+  strict_mode: false
+  skip_templates:
+    - '*test*.yaml'
+    - '_*.yml'
+
+# Rollback Configuration
+rollback:
+  automatic: true
+  max_attempts: 3
+  delay_between_attempts: 30  # seconds
+
+# Reporting Configuration
+reporting:
+  generate_report: true
+  report_directory: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/reports
+  report_filename: cloudformation_deployment_report.json
+
+# Parameter File Configuration
+parameter_files:
+  base_path: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/cloudformation/params
+  filename_pattern: storage-{env}.params.json
+
+# AWS Specific Configuration
+aws:
+  assume_role: false
+  role_arn: null
+  external_id: null
+
+# Monitoring and Alerting
+monitoring:
+  cloudwatch_alarms: true
+  sns_notifications: false
+  notification_topic: null
+
+# Performance Optimization
+performance:
+  parallel_deployments: false
+  max_concurrent_stacks: 3
+  timeout_per_stack: 1800  # 30 minutes

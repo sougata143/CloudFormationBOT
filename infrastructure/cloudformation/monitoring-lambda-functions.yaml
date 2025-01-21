@@ -1,0 +1,232 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Lambda Functions for Monitoring and Alerting'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+  
+  CostAlertTopicArn:
+    Type: String
+    Description: SNS Topic ARN for Cost Alerts
+  
+  ReplicationTestTopicArn:
+    Type: String
+    Description: SNS Topic ARN for Replication Test Alerts
+  
+  DisasterRecoveryTopicArn:
+    Type: String
+    Description: SNS Topic ARN for Disaster Recovery Alerts
+
+Resources:
+  # Lambda Execution Role
+  MonitoringLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MonitoringAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ce:GetCostAndUsage
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - sns:Publish
+                Resource: '*'
+
+  # Cost Optimization Lambda Function
+  CostOptimizationMonitorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'cost-optimization-monitor-${Environment}'
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt MonitoringLambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import json
+          from datetime import datetime, timedelta
+
+          def handler(event, context):
+              ce_client = boto3.client('ce')
+              sns_client = boto3.client('sns')
+
+              # Get daily cost
+              end = datetime.now()
+              start = end - timedelta(days=1)
+              
+              response = ce_client.get_cost_and_usage(
+                  TimePeriod={
+                      'Start': start.strftime('%Y-%m-%d'),
+                      'End': end.strftime('%Y-%m-%d')
+                  },
+                  Granularity='DAILY',
+                  Metrics=['UnblendedCost']
+              )
+
+              total_cost = sum(
+                  float(result['Total']['UnblendedCost']['Amount'])
+                  for result in response['ResultsByTime']
+              )
+
+              # Send alert if cost exceeds threshold
+              if total_cost > 100:
+                  sns_client.publish(
+                      TopicArn=os.environ['COST_ALERT_TOPIC_ARN'],
+                      Message=f"Daily cost alert: ${total_cost:.2f} exceeds threshold of $100",
+                      Subject='AWS Cost Optimization Alert'
+                  )
+
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps(f'Daily cost: ${total_cost:.2f}')
+              }
+      Environment:
+        Variables:
+          COST_ALERT_TOPIC_ARN: !Ref CostAlertTopicArn
+      Timeout: 300
+
+  # Replication Test Lambda Function
+  ReplicationTestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'replication-test-${Environment}'
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt MonitoringLambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import json
+          import hashlib
+          import time
+
+          def handler(event, context):
+              s3_client = boto3.client('s3')
+              sns_client = boto3.client('sns')
+
+              source_bucket = os.environ['SOURCE_BUCKET']
+              destination_bucket = os.environ['DESTINATION_BUCKET']
+
+              # Generate test file
+              test_data = os.urandom(10 * 1024 * 1024)  # 10 MB
+              object_key = f'replication_test_{hashlib.md5(test_data).hexdigest()}.bin'
+
+              # Upload to source bucket
+              s3_client.put_object(Bucket=source_bucket, Key=object_key, Body=test_data)
+
+              # Wait and verify replication
+              time.sleep(300)  # Wait 5 minutes
+
+              try:
+                  s3_client.head_object(Bucket=destination_bucket, Key=object_key)
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Replication successful')
+                  }
+              except Exception as e:
+                  # Send alert
+                  sns_client.publish(
+                      TopicArn=os.environ['REPLICATION_TEST_TOPIC_ARN'],
+                      Message=f"Replication test failed: {str(e)}",
+                      Subject='S3 Replication Test Failure'
+                  )
+                  raise
+      Environment:
+        Variables:
+          SOURCE_BUCKET: !Sub 'microservice-${Environment}-storage'
+          DESTINATION_BUCKET: !Sub 'microservice-${Environment}-storage-replica'
+          REPLICATION_TEST_TOPIC_ARN: !Ref ReplicationTestTopicArn
+      Timeout: 600
+
+  # Disaster Recovery Monitoring Lambda Function
+  DisasterRecoveryMonitorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'disaster-recovery-monitor-${Environment}'
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt MonitoringLambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import json
+          from datetime import datetime
+
+          def handler(event, context):
+              s3_client = boto3.client('s3')
+              sns_client = boto3.client('sns')
+
+              source_bucket = os.environ['SOURCE_BUCKET']
+              backup_bucket = os.environ['BACKUP_BUCKET']
+
+              try:
+                  # Retrieve bucket configuration
+                  versioning = s3_client.get_bucket_versioning(Bucket=source_bucket)
+                  policy = s3_client.get_bucket_policy(Bucket=source_bucket)
+                  lifecycle = s3_client.get_bucket_lifecycle_configuration(Bucket=source_bucket)
+
+                  # Create backup configuration
+                  backup_data = {
+                      'timestamp': datetime.now().isoformat(),
+                      'bucket_versioning': versioning.get('Status'),
+                      'bucket_policy': policy['Policy'],
+                      'bucket_lifecycle': lifecycle['Rules']
+                  }
+
+                  # Store backup in S3
+                  backup_key = f'disaster_recovery_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+                  s3_client.put_object(
+                      Bucket=backup_bucket,
+                      Key=backup_key,
+                      Body=json.dumps(backup_data, indent=2)
+                  )
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Disaster recovery backup successful')
+                  }
+              except Exception as e:
+                  # Send alert
+                  sns_client.publish(
+                      TopicArn=os.environ['DISASTER_RECOVERY_TOPIC_ARN'],
+                      Message=f"Disaster recovery backup failed: {str(e)}",
+                      Subject='Disaster Recovery Backup Failure'
+                  )
+                  raise
+      Environment:
+        Variables:
+          SOURCE_BUCKET: !Sub 'microservice-${Environment}-storage'
+          BACKUP_BUCKET: !Sub 'microservice-${Environment}-backup'
+          DISASTER_RECOVERY_TOPIC_ARN: !Ref DisasterRecoveryTopicArn
+      Timeout: 300
+
+Outputs:
+  CostOptimizationMonitorFunctionArn:
+    Description: ARN of Cost Optimization Monitor Lambda Function
+    Value: !GetAtt CostOptimizationMonitorFunction.Arn
+
+  ReplicationTestFunctionArn:
+    Description: ARN of Replication Test Lambda Function
+    Value: !GetAtt ReplicationTestFunction.Arn
+
+  DisasterRecoveryMonitorFunctionArn:
+    Description: ARN of Disaster Recovery Monitor Lambda Function
+    Value: !GetAtt DisasterRecoveryMonitorFunction.Arn

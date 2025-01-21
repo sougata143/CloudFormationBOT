@@ -1,0 +1,8 @@
+{
+    "BucketNamePrefix": "microservice-dev-storage",
+    "EnableVersioning": "true",
+    "AccessControlLevel": "Private",
+    "TransitionToInfrequentAccessDays": 45,
+    "EncryptionType": "SSE-S3",
+    "LegalHoldEnabled": "false"
+}

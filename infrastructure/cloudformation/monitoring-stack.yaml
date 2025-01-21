@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Comprehensive Monitoring and Observability Stack'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: MicroserviceEnv
+
+Resources:
+  # CloudWatch Dashboards
+  MicroserviceDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${EnvironmentName}-Microservice-Dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/ECS", "CPUUtilization", "ClusterName", "${EnvironmentName}-Microservice-Cluster"],
+                  [".", "MemoryUtilization", ".", "."]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "ECS Cluster Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", "${EnvironmentName}-Microservice-ALB"],
+                  [".", "RequestCount", ".", "."]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Load Balancer Metrics"
+              }
+            }
+          ]
+        }
+
+  # CloudWatch Alarms
+  HighCPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-High-CPU-Utilization
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Period: 300
+      Statistic: Average
+      Threshold: 80
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+
+  # SNS Topic for Notifications
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${EnvironmentName}-Alarm-Notifications
+
+  # X-Ray Tracing
+  XRayTracingGroup:
+    Type: AWS::XRay::Group
+    Properties:
+      GroupName: !Sub "${Environment}-traces"
+      FilterExpression: "service(\"microservice\")"
+      InsightsConfiguration:
+        InsightsEnabled: true
+
+Outputs:
+  MonitoringDashboard:
+    Description: CloudWatch Dashboard Name
+    Value: !Ref MicroserviceDashboard
+
+  AlarmNotificationTopicArn:
+    Description: SNS Topic for Alarm Notifications
+    Value: !Ref AlarmNotificationTopic

@@ -1,0 +1,8 @@
+{
+    "BucketNamePrefix": "microservice-staging-storage",
+    "EnableVersioning": "true", 
+    "AccessControlLevel": "BucketOwnerFullControl",
+    "TransitionToInfrequentAccessDays": 30,
+    "EncryptionType": "SSE-KMS",
+    "LegalHoldEnabled": "true"
+}

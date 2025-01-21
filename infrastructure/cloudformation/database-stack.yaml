@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Database Stack for Microservices'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy database resources
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private subnet for database
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private subnet for database
+
+  DatabasePassword:
+    Type: String
+    NoEcho: true
+    Description: Password for the database
+    Default: ''
+
+Conditions:
+  UseDefaultPassword: !Equals [!Ref DatabasePassword, '']
+
+Resources:
+  # Generate a random database password if not provided
+  DatabasePasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: UseDefaultPassword
+    Properties:
+      Name: !Sub microservice-database-password-${Environment}
+      Description: Database password for microservices
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "microserviceadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\'
+
+  # Store database password in SSM Parameter Store
+  DatabasePasswordParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /microservice/${Environment}/database/password
+      Type: String
+      Value: !If 
+        - UseDefaultPassword
+        - !Sub '{{resolve:secretsmanager:${DatabasePasswordSecret}:SecretString:password}}'
+        - !Ref DatabasePassword
+
+  # Database Subnet Group
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets available for the RDS DB Instance
+      SubnetIds: 
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  # Security Group for Database
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow database access
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0  # Restrict this in production
+
+  # RDS PostgreSQL Instance
+  DatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Sub microservice_${Environment}_db
+      Engine: postgres
+      EngineVersion: '13.18'  # Use a valid PostgreSQL version
+      MasterUsername: microserviceadmin
+      MasterUserPassword: !If 
+        - UseDefaultPassword
+        - !Sub '{{resolve:secretsmanager:${DatabasePasswordSecret}:SecretString:password}}'
+        - !Ref DatabasePassword
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      PubliclyAccessible: false
+      VPCSecurityGroups: 
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+
+Outputs:
+  DatabaseEndpoint:
+    Description: Database endpoint
+    Value: !GetAtt DatabaseInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabaseEndpoint
+
+  DatabasePort:
+    Description: Database port
+    Value: !GetAtt DatabaseInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabasePort
+
+  DatabasePasswordParameterName:
+    Description: SSM Parameter Store name for database password
+    Value: !Sub /microservice/${Environment}/database/password
+    Export:
+      Name: !Sub ${AWS::StackName}-DatabasePasswordParameterName

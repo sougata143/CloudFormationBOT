@@ -1,0 +1,8 @@
+{
+    "BucketNamePrefix": "microservice-prod-storage",
+    "EnableVersioning": "true",
+    "AccessControlLevel": "Private", 
+    "TransitionToInfrequentAccessDays": 15,
+    "EncryptionType": "SSE-KMS",
+    "LegalHoldEnabled": "true"
+}

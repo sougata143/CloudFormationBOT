@@ -1,0 +1,16 @@
+[2025-01-21 10:15:59] [INFO] Starting CloudFormation Deployment
+[2025-01-21 10:15:59] [INFO] Environment: dev
+[2025-01-21 10:15:59] [INFO] Region: us-east-1
+[2025-01-21 10:15:59] [INFO] Deployment Log: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/logs/deployments/cloudformation_deployment_20250121_101559.log
+[2025-01-21 10:15:59] [INFO] Error Log: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/logs/deployments/cloudformation_deployment_errors_20250121_101559.log
+[2025-01-21 10:15:59] [INFO] Deploying network-stack for dev
+[2025-01-21 10:15:59] [INFO] Found stack script: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/scripts/shellscripts/stackscripts/network-stack.sh
+[2025-01-21 10:15:59] [INFO] Executing stack deployment script: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/scripts/shellscripts/stackscripts/network-stack.sh
+[2025-01-21 10:15:59] [INFO] ------- Stack Deployment Details -------
+[2025-01-21 10:15:59] [INFO] Environment: dev
+[2025-01-21 10:15:59] [INFO] Region: us-east-1
+[2025-01-21 10:15:59] [INFO] Searching for deployment functions with these candidates:
+[2025-01-21 10:15:59] [INFO]   - Checking: deploy_network_stack_stack
+[2025-01-21 10:15:59] [INFO]   - Checking: deploy_network_stack
+[2025-01-21 10:15:59] [INFO]   - Checking: deploy_network_stack
+[2025-01-21 10:15:59] [INFO] Sourcing script: /Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/scripts/shellscripts/stackscripts/network-stack.sh

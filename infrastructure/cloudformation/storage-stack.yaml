@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Storage Infrastructure Stack
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+
+  BucketNamePrefix:
+    Type: String
+    Default: microservice
+    Description: Prefix for S3 bucket names
+
+  EnableVersioning:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Enable versioning for S3 buckets
+
+  ReplicationRoleName:
+    Type: String
+    Default: microservice-replication-role
+    Description: Name of the replication IAM role
+
+  ReplicationRegion:
+    Type: String
+    Default: us-east-1
+    Description: Destination region for S3 replication
+
+  ReplicationBucket:
+    Type: String
+    Default: ''
+    Description: Name of the replication bucket
+
+Resources:
+  # Existing Primary Storage Bucket
+  PrimaryStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${BucketNamePrefix}-${AWS::Region}-${AWS::AccountId}'
+      VersioningConfiguration: 
+        !If 
+          - IsVersioningEnabled
+          - Status: Enabled
+          - Status: Suspended
+      
+      # Server-side Encryption
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      # Logging Configuration
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: primary-storage-logs/
+
+      # Lifecycle Rules
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToInfrequentAccess
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 30
+
+      # Public Access Block
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Existing Replication IAM Role
+  ReplicationRole:
+    Type: AWS::IAM::Role
+    Condition: EnableReplication
+    Properties:
+      RoleName: !Ref ReplicationRoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetReplicationConfiguration'
+                  - 's3:ListBucket'
+                Resource: !GetAtt PrimaryStorageBucket.Arn
+              - Effect: Allow
+                Action:
+                  - 's3:GetObjectVersionForReplication'
+                  - 's3:GetObjectVersionAcl'
+                  - 's3:ReplicateObject'
+                  - 's3:ReplicateDelete'
+                Resource: 
+                  - !Sub '${PrimaryStorageBucket.Arn}/*'
+                  # Only add ReplicationBucket if it's not empty
+                  - !If 
+                    - EnableReplication
+                    - !Sub 'arn:aws:s3:::${ReplicationBucket}/*'
+                    - !Ref 'AWS::NoValue'
+
+  # Existing Logging Bucket
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub microservice-logging-bucket-${Environment}
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        # BlockPublicPolicyAcls: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToInfrequentAccess
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 30
+          - Id: ExpireOldLogs
+            Status: Enabled
+            ExpirationInDays: 90
+
+Conditions:
+  IsVersioningEnabled: !Equals [!Ref EnableVersioning, 'true']
+  EnableReplication: !Not [!Equals [!Ref ReplicationBucket, '']]
+
+Outputs:
+  PrimaryStorageBucketName:
+    Description: Primary Storage Bucket Name
+    Value: !Ref PrimaryStorageBucket

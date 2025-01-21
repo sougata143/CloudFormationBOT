@@ -1,0 +1,148 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  containers:
+                  - name: maven
+                    image: maven:3.8.4-openjdk-17-slim
+                    command:
+                    - cat
+                    tty: true
+                  - name: docker
+                    image: docker:20.10.12
+                    command:
+                    - cat
+                    tty: true
+                    volumeMounts:
+                    - name: dockersock
+                      mountPath: /var/run/docker.sock
+                  volumes:
+                  - name: dockersock
+                    hostPath:
+                      path: /var/run/docker.sock
+            '''
+        }
+    }
+    
+    environment {
+        // AWS and Docker credentials
+        AWS_CREDENTIALS = credentials('aws-deployment-credentials')
+        DOCKER_REGISTRY = 'your-ecr-registry-url'
+        SERVICE_NAME = 'microservice-backend'
+        REGION = 'us-west-2'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Dependency Scan') {
+            steps {
+                container('maven') {
+                    sh 'mvn dependency:resolve'
+                    // Dependency vulnerability scanning
+                    sh 'mvn org.owasp:dependency-check-maven:check'
+                }
+            }
+        }
+        
+        stage('Unit Testing') {
+            steps {
+                container('maven') {
+                    sh 'mvn test'
+                    junit '**/target/surefire-reports/TEST-*.xml'
+                }
+            }
+        }
+        
+        stage('Static Code Analysis') {
+            steps {
+                container('maven') {
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                container('docker') {
+                    script {
+                        docker.withRegistry("https://${DOCKER_REGISTRY}", "ecr:${REGION}:${AWS_CREDENTIALS}") {
+                            def customImage = docker.build("${SERVICE_NAME}:${env.BUILD_NUMBER}")
+                            customImage.push()
+                            customImage.push('latest')
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to ECS') {
+            steps {
+                withAWS(credentials: 'aws-deployment-credentials', region: "${REGION}") {
+                    script {
+                        // Update ECS task definition
+                        sh """
+                            aws ecs update-service \
+                            --cluster microservice-cluster \
+                            --service ${SERVICE_NAME} \
+                            --task-definition ${SERVICE_NAME}:${env.BUILD_NUMBER}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Integration Testing') {
+            steps {
+                script {
+                    // Run integration tests against deployed service
+                    sh 'mvn verify -P integration-tests'
+                }
+            }
+        }
+        
+        stage('Rollback on Failure') {
+            when {
+                expression { currentBuild.result == 'FAILURE' }
+            }
+            steps {
+                withAWS(credentials: 'aws-deployment-credentials', region: "${REGION}") {
+                    script {
+                        // Rollback to previous stable version
+                        sh """
+                            aws ecs update-service \
+                            --cluster microservice-cluster \
+                            --service ${SERVICE_NAME} \
+                            --task-definition ${SERVICE_NAME}:previous
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            // Cleanup and notifications
+            cleanWs()
+            
+            // Send notifications
+            emailext (
+                subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",
+                body: """
+                    <p>Build Status: ${currentBuild.currentResult}</p>
+                    <p>Build Number: ${env.BUILD_NUMBER}</p>
+                    <p>Check console output at: ${env.BUILD_URL}</p>
+                """,
+                to: 'devops-team@company.com'
+            )
+        }
+    }
+}

@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Scheduled Monitoring Jobs for Microservices
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+
+Resources:
+  # Monitoring Event Role
+  MonitoringEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaInvocationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: 
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cost-optimization-monitor-${Environment}"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:disaster-recovery-monitor-${Environment}"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:replication-test-${Environment}"
+
+  # Daily Cost Optimization Schedule
+  DailyCostOptimizationSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "daily-cost-optimization-check-${Environment}"
+      Description: Daily schedule for cost optimization monitoring
+      ScheduleExpression: cron(0 8 * * ? *)
+      State: ENABLED
+      Targets: 
+        - Id: CostOptimizationLambdaTarget
+          Arn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cost-optimization-monitor-${Environment}"
+
+  # Daily Disaster Recovery Schedule  
+  DailyDisasterRecoverySchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "daily-disaster-recovery-check-${Environment}"
+      Description: Daily disaster recovery configuration backup
+      ScheduleExpression: cron(30 7 * * ? *)
+      State: ENABLED
+      Targets: 
+        - Id: DisasterRecoveryLambdaTarget
+          Arn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:disaster-recovery-monitor-${Environment}"
+
+  # Hourly Replication Test Schedule
+  HourlyReplicationTestSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "hourly-replication-test-${Environment}"
+      Description: Hourly S3 replication test
+      ScheduleExpression: cron(0 * * * ? *)
+      State: ENABLED
+      Targets: 
+        - Id: ReplicationTestLambdaTarget
+          Arn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:replication-test-${Environment}"
+
+Outputs:
+  MonitoringEventRoleArn:
+    Description: ARN of the Monitoring Event Role
+    Value: !GetAtt MonitoringEventRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-MonitoringEventRoleArn"
