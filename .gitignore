@@ -8,6 +8,7 @@
 *.bak
 *.swp
 .DS_Store
+**/.DS_Store
 backend/src/.DS_Store
 backend/target/.DS_Store
 cicd/.DS_Store
