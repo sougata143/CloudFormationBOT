@@ -7,12 +7,56 @@ Parameters:
     Default: dev
     AllowedValues: ['dev', 'staging', 'prod']
     Description: Deployment environment
+  
   EnvironmentName:
     Description: An environment name that is prefixed to resource names
     Type: String
-    Default: MicroserviceEnv
+    Default: microserviceenv
+
+  KMSKeyArn:
+    Description: Optional KMS Key ARN for encryption
+    Type: String
+    Default: ''
+
+Conditions:
+  HasKMSKeyArn: 
+    !Not 
+      - !Equals 
+        - !Ref KMSKeyArn
+        - ''
+  
+  CreateKMSKey: 
+    !Equals 
+      - !Ref KMSKeyArn
+      - ''
 
 Resources:
+  # KMS Key for Encryption (if not provided)
+  BackupKMSKey:
+    Type: AWS::KMS::Key
+    Condition: CreateKMSKey
+    Properties:
+      Description: !Sub KMS Key for ${EnvironmentName} Disaster Recovery Backups
+      Enabled: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: 
+              - kms:*
+            Resource: '*'
+          - Sid: Allow Backup Service
+            Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: '*'
+
   # S3 Backup Bucket
   BackupBucket:
     Type: AWS::S3::Bucket
@@ -23,14 +67,12 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      LifecycleConfiguration:
-        Rules:
-          - Id: TransitionToGlacier
-            Status: Enabled
-            Transitions:
-              - StorageClass: Glacier
-                TransitionInDays: 30
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: 
+                !If 
+                  - HasKMSKeyArn
+                  - !Ref KMSKeyArn
+                  - !GetAtt BackupKMSKey.Arn
 
   # RDS Backup Vault
   RDSBackupVault:
@@ -38,7 +80,10 @@ Resources:
     Properties:
       BackupVaultName: !Sub ${EnvironmentName}-RDS-Backup-Vault
       EncryptionKeyArn: 
-        Fn::ImportValue: !Sub ${EnvironmentName}-KMSKeyArn
+        !If 
+          - HasKMSKeyArn
+          - !Ref KMSKeyArn
+          - !GetAtt BackupKMSKey.Arn
 
   # Backup Plan for RDS
   RDSBackupPlan:
@@ -46,42 +91,34 @@ Resources:
     Properties:
       BackupPlan:
         BackupPlanName: !Sub ${EnvironmentName}-RDS-Backup-Plan
-        Rules:
+        BackupPlanRule:
           - RuleName: DailyBackups
             TargetBackupVault: !Ref RDSBackupVault
             ScheduleExpression: cron(0 5 ? * * *)
             StartWindowMinutes: 60
             CompletionWindowMinutes: 120
             Lifecycle:
-              DeleteAfterDays: 35
-
-  # Cross-Region Replication for S3
-  S3ReplicationRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: s3.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: S3ReplicationPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetReplicationConfiguration
-                  - s3:ListBucket
-                Resource: !GetAtt BackupBucket.Arn
+              DeleteAfterDays: 30
 
 Outputs:
   BackupBucketName:
-    Description: Disaster Recovery Backup Bucket
+    Description: Backup S3 Bucket Name
     Value: !Ref BackupBucket
+    Export:
+      Name: !Sub ${EnvironmentName}-BackupBucketName
 
   RDSBackupVaultName:
     Description: RDS Backup Vault Name
     Value: !Ref RDSBackupVault
+    Export:
+      Name: !Sub ${EnvironmentName}-RDSBackupVaultName
+
+  KMSKeyArn:
+    Description: KMS Key ARN used for Backup Encryption
+    Value: 
+      !If 
+        - HasKMSKeyArn
+        - !Ref KMSKeyArn
+        - !GetAtt BackupKMSKey.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-KMSKeyArn
