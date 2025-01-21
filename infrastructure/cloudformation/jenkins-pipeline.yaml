@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Jenkins CI/CD Pipeline for Microservice Deployment'
+Description: 'Jenkins Pipeline Infrastructure'
 
 Parameters:
   Environment:
@@ -7,68 +7,86 @@ Parameters:
     Default: dev
     AllowedValues: ['dev', 'staging', 'prod']
     Description: Deployment environment
+  
   EnvironmentName:
     Description: An environment name that is prefixed to resource names
     Type: String
-    Default: MicroserviceEnv
+    Default: microserviceenv
+
+  VpcId:
+    Description: Optional VPC ID for Jenkins resources
+    Type: String
+    Default: ''
+
+Conditions:
+  CreateVpcResources: 
+    !Equals 
+      - !Ref VpcId
+      - ''
 
 Resources:
-  # Jenkins IAM Role
+  # IAM Role for Jenkins Master
   JenkinsMasterRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub ${EnvironmentName}-jenkins-master-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
-              Service: ec2.amazonaws.com
+              Service: 
+                - ec2.amazonaws.com
+                - codepipeline.amazonaws.com
+                - codebuild.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AWSCodePipelineFullAccess
+        - arn:aws:iam::aws:policy/AWSCodePipeline_FullAccess
         - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
         - arn:aws:iam::aws:policy/AmazonECS_FullAccess
+      Policies:
+        - PolicyName: JenkinsMasterPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - ec2:*
+                  - ecs:*
+                  - ecr:*
+                  - iam:PassRole
+                Resource: '*'
 
-  # CodeBuild Project for Backend
-  BackendBuildProject:
-    Type: AWS::CodeBuild::Project
+  # Security Group for Jenkins Master
+  JenkinsMasterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      Name: !Sub ${EnvironmentName}-backend-build
-      ServiceRole: !GetAtt JenkinsMasterRole.Arn
-      Artifacts:
-        Type: NO_ARTIFACTS
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
-        PrivilegedMode: true
-      Source:
-        Type: GITHUB
-        Location: https://github.com/yourusername/microservice-repo.git
-        BuildSpec: buildspec-backend.yml
-
-  # CodeBuild Project for Frontend
-  FrontendBuildProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${EnvironmentName}-frontend-build
-      ServiceRole: !GetAtt JenkinsMasterRole.Arn
-      Artifacts:
-        Type: NO_ARTIFACTS
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
-      Source:
-        Type: GITHUB
-        Location: https://github.com/yourusername/frontend-repo.git
-        BuildSpec: buildspec-frontend.yml
+      GroupDescription: Security group for Jenkins Master
+      VpcId: 
+        !If 
+          - CreateVpcResources
+          - !Ref AWS::NoValue
+          - !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
 
 Outputs:
-  BackendBuildProjectName:
-    Description: Backend Build Project Name
-    Value: !Ref BackendBuildProject
+  JenkinsMasterRoleArn:
+    Description: ARN of Jenkins Master IAM Role
+    Value: !GetAtt JenkinsMasterRole.Arn
+    Export:
+      Name: !Sub ${EnvironmentName}-JenkinsMasterRoleArn
 
-  FrontendBuildProjectName:
-    Description: Frontend Build Project Name
-    Value: !Ref FrontendBuildProject
+  JenkinsMasterSecurityGroupId:
+    Description: Security Group ID for Jenkins Master
+    Value: !Ref JenkinsMasterSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-JenkinsMasterSecurityGroupId

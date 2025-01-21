@@ -1,0 +1,83 @@
+# AWS CloudFormation
+*.template.json
+*.template.yml
+*.template.yaml
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+.DS_Store
+**/.DS_Store
+backend/src/.DS_Store
+backend/target/.DS_Store
+cicd/.DS_Store
+frontend/.DS_Store
+infrastructure/.DS_Store
+infrastructure/cloudformation/.DS_Store
+infrastructure/config/.DS_Store
+infrastructure/infrastructure/logs/.DS_Store
+infrastructure/logs/.DS_Store
+infrastructure/scripts/.DS_Store
+infrastructure/scripts/shellscripts/.DS_Store
+venv/
+
+# Credentials and sensitive information
+*.pem
+*.key
+*.crt
+*.csr
+.env
+*.credentials
+
+# Deployment artifacts
+*.zip
+*.tar
+*.gz
+
+# Logs
+*.log
+logs/
+
+# IDE-specific files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Dependency directories
+node_modules/
+vendor/
+
+# Build output
+build/
+dist/
+out/
+
+# CloudFormation specific
+.aws-sam/
+samconfig.toml
+
+# Terraform (if used alongside CloudFormation)
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Serverless Framework
+.serverless/
+
+# AWS SAM
+.aws-sam/
+
+# Secrets management
+secrets.yml
+secrets.json
+
+# Miscellaneous
+*.log
+.tmp/

@@ -56,6 +56,13 @@ deploy_monitoring_stack() {
             
             return 1
         fi
+
+        # Validate SNS topic stack exists
+        local sns_stack_name="microservice-monitoring-sns-topics-${environment}"
+        if ! aws cloudformation describe-stacks --stack-name "${sns_stack_name}" --region "${region}" &>/dev/null; then
+            log "SNS Topics stack ${sns_stack_name} does not exist" "ERROR"
+            return 1
+        fi
         
         # Retrieve SNS topic ARNs
         local cost_alert_topic_arn
@@ -143,7 +150,12 @@ deploy_monitoring_stack() {
         fi
         
         # Deploy monitoring lambda functions
-        log "Deploying Monitoring Lambda Functions"
+        log "Deploying Monitoring Lambda Functions" "INFO"
+        log "Using SNS Topic ARNs:" "INFO"
+        log "- Cost Alert Topic: ${cost_alert_topic_arn}" "INFO"
+        log "- Replication Test Topic: ${replication_test_topic_arn}" "INFO"
+        log "- Disaster Recovery Topic: ${disaster_recovery_topic_arn}" "INFO"
+        
         local lambda_functions_output
         lambda_functions_output=$(aws cloudformation deploy \
             --template-file "/Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/cloudformation/monitoring-lambda-functions.yaml" \
@@ -157,15 +169,27 @@ deploy_monitoring_stack() {
             --region "${region}" 2>&1)
         local lambda_functions_status=$?
         
+        # Always log the output for troubleshooting
+        log "Lambda Functions Deployment Output:" "INFO"
+        log "${lambda_functions_output}" "INFO"
+        
+        # Check deployment status
         if [[ ${lambda_functions_status} -ne 0 ]]; then
             log "Failed to deploy Monitoring Lambda Functions" "ERROR"
-            log "${lambda_functions_output}" "ERROR"
+            
+            # Log detailed error information
+            log "Detailed Error Information:" "ERROR"
+            echo "${lambda_functions_output}" | grep -E "ERROR|Failed|error" | while read -r error_line; do
+                log "${error_line}" "ERROR"
+            done
             
             # Log stack events in case of failure
             log_stack_events "microservice-monitoring-lambda-functions-${environment}" "${region}"
             
             return 1
         fi
+        
+        log "Monitoring Lambda Functions Deployed Successfully" "INFO"
         
         return 0
 }

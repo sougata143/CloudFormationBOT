@@ -51,11 +51,15 @@ chmod 666 "${DEPLOYMENT_LOG}" "${ERROR_LOG}"
 
 # Stack deployment order and scripts
 STACK_DEPLOYMENT_ORDER=(
-    "network-stack.sh"
-    "database-stack.sh"
-    "storage-stack.sh"
-    "microservices-stack.sh"
-    "monitoring-stack.sh"
+    "network-stack"
+    "database-stack"
+    "storage-stack"
+    "microservices-stack"
+    "monitoring-stack"
+    "frontend-stack"
+    "disaster-recovery-stack"
+    "route53-stack"
+    "jenkins-pipeline-stack"
 )
 
 # Deployment function
@@ -68,8 +72,8 @@ deploy_stack() {
     
     # Multiple potential paths for stack script
     local stack_script_paths=(
-        "${PROJECT_ROOT}/infrastructure/scripts/shellscripts/stackscripts/${stack_script}"
-        "/Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/scripts/shellscripts/stackscripts/${stack_script}"
+        "${PROJECT_ROOT}/infrastructure/scripts/shellscripts/stackscripts/${stack_script}.sh"
+        "/Users/sougataroy/Documents/Developer/Code/BOT/CloudFormationBOT/infrastructure/scripts/shellscripts/stackscripts/${stack_script}.sh"
     )
     
     local script_found=false

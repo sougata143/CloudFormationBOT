@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Route53 DNS Routing and Health Check Configuration'
+Description: 'Route53 DNS Configuration for Microservices'
 
 Parameters:
   Environment:
@@ -7,93 +7,106 @@ Parameters:
     Default: dev
     AllowedValues: ['dev', 'staging', 'prod']
     Description: Deployment environment
-  EnvironmentName:
-    Description: An environment name that is prefixed to resource names
-    Type: String
-    Default: MicroserviceEnv
 
   RootDomainName:
-    Description: Root domain name for the application
     Type: String
     Default: yourdomain.com
+    Description: Root domain name for the microservices
 
-  SubdomainPrefix:
-    Description: Subdomain prefix for microservice
+  HostedZoneId:
     Type: String
-    Default: app
+    Default: ''
+    Description: Optional existing Hosted Zone ID. If not provided, a new zone will be created.
+
+  CloudFrontDomainName:
+    Type: String
+    Description: CloudFront distribution domain name
+    Default: d1darej3ompb63.cloudfront.net
+
+  ApiEndpointDomain:
+    Type: String
+    Description: API Gateway or Backend Service Domain
+    Default: yourdomain.com
+
+Conditions:
+  CreateNewHostedZone: !Equals [!Ref HostedZoneId, '']
 
 Resources:
-  # Route53 Hosted Zone
   MicroserviceHostedZone:
     Type: AWS::Route53::HostedZone
+    Condition: CreateNewHostedZone
     Properties:
       Name: !Ref RootDomainName
 
-  # Frontend Domain Record
-  FrontendDomainRecord:
-    Type: AWS::Route53::RecordSet
-    Properties:
-      HostedZoneName: !Sub ${RootDomainName}.
-      Name: !Sub ${SubdomainPrefix}.${RootDomainName}.
-      Type: A
-      AliasTarget:
-        HostedZoneId: 
-          Fn::ImportValue: !Sub ${EnvironmentName}-CloudFrontDistributionZoneId
-        DNSName: 
-          Fn::ImportValue: !Sub ${EnvironmentName}-CloudFrontDomainName
-
-  # Microservice Domain Record
-  MicroserviceDomainRecord:
-    Type: AWS::Route53::RecordSet
-    Properties:
-      HostedZoneName: !Sub ${RootDomainName}.
-      Name: !Sub api.${RootDomainName}.
-      Type: A
-      AliasTarget:
-        HostedZoneId: 
-          Fn::ImportValue: !Sub ${EnvironmentName}-ALBCanonicalHostedZoneID
-        DNSName: 
-          Fn::ImportValue: !Sub ${EnvironmentName}-MicroserviceEndpoint
-
-  # Health Check for Frontend
-  FrontendHealthCheck:
-    Type: AWS::Route53::HealthCheck
-    Properties:
-      HealthCheckConfig:
-        Type: HTTPS
-        FullyQualifiedDomainName: !Sub ${SubdomainPrefix}.${RootDomainName}
-        Port: 443
-        ResourcePath: /
-        RequestInterval: 30
-        FailureThreshold: 3
-      HealthCheckTags:
-        - Key: Name
-          Value: Frontend Health Check
-
-  # Health Check for Microservice
   MicroserviceHealthCheck:
     Type: AWS::Route53::HealthCheck
     Properties:
       HealthCheckConfig:
         Type: HTTPS
-        FullyQualifiedDomainName: !Sub api.${RootDomainName}
+        ResourcePath: /health
+        FullyQualifiedDomainName: !Ref ApiEndpointDomain
         Port: 443
-        ResourcePath: /actuator/health
         RequestInterval: 30
         FailureThreshold: 3
-      HealthCheckTags:
-        - Key: Name
-          Value: Microservice Health Check
+
+  FrontendHealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig:
+        Type: HTTPS
+        ResourcePath: /
+        FullyQualifiedDomainName: !Ref CloudFrontDomainName
+        Port: 443
+        RequestInterval: 30
+        FailureThreshold: 3
+
+  MicroserviceDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: 
+        !If 
+          - CreateNewHostedZone
+          - !Ref MicroserviceHostedZone
+          - !Ref HostedZoneId
+      Name: !Sub api.${RootDomainName}.
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront's global hosted zone ID
+        DNSName: !Ref ApiEndpointDomain
+
+  FrontendDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: 
+        !If 
+          - CreateNewHostedZone
+          - !Ref MicroserviceHostedZone
+          - !Ref HostedZoneId
+      Name: !Sub app.${RootDomainName}.
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront's global hosted zone ID
+        DNSName: !Ref CloudFrontDomainName
 
 Outputs:
-  FrontendDomain:
-    Description: Frontend Domain Name
-    Value: !Ref FrontendDomainRecord
+  MicroserviceHostedZoneId:
+    Description: Hosted Zone ID for Microservice Domain
+    Value: 
+      !If 
+        - CreateNewHostedZone
+        - !Ref MicroserviceHostedZone
+        - !Ref HostedZoneId
     Export:
-      Name: !Sub ${EnvironmentName}-FrontendDomain
+      Name: !Sub ${Environment}-MicroserviceHostedZoneId
 
-  MicroserviceDomain:
-    Description: Microservice Domain Name
-    Value: !Ref MicroserviceDomainRecord
+  MicroserviceHealthCheckId:
+    Description: Health Check ID for Microservice Endpoint
+    Value: !Ref MicroserviceHealthCheck
     Export:
-      Name: !Sub ${EnvironmentName}-MicroserviceDomain
+      Name: !Sub ${Environment}-MicroserviceHealthCheckId
+
+  FrontendHealthCheckId:
+    Description: Health Check ID for Frontend Endpoint
+    Value: !Ref FrontendHealthCheck
+    Export:
+      Name: !Sub ${Environment}-FrontendHealthCheckId
