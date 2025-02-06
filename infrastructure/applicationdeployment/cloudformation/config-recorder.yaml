@@ -1,0 +1,207 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Config Configuration Recorder and Delivery Channel'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Deployment environment
+
+  CreateConfigRecorder:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Whether to create AWS Config resources
+
+  CreateAuditLogBucket:
+    Type: String
+    Default: 'false'
+    AllowedValues: 
+      - 'true'
+      - 'false'
+    Description: Whether to create a new Audit Log S3 Bucket
+
+Conditions:
+  CreateConfigRecorderResource: !Equals 
+    - !Ref CreateConfigRecorder
+    - 'true'
+  CreateAuditLogBucketResource: !Equals 
+    - !Ref CreateAuditLogBucket
+    - 'true'
+
+Resources:
+  # IAM Role for AWS Config Service
+  ConfigServiceRole:
+    Type: AWS::IAM::Role
+    Condition: CreateConfigRecorderResource
+    Properties:
+      RoleName: !Sub ${Environment}-ConfigServiceRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSConfigRole
+        - arn:aws:iam::aws:policy/AWSConfigRole
+      Policies:
+        - PolicyName: !Sub ${Environment}-ConfigServiceFullAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - config:Put*
+                  - config:Get*
+                  - config:List*
+                  - config:Describe*
+                  - config:Start*
+                  - config:Stop*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetBucketAcl
+                  - s3:ListBucket
+                Resource: 
+                  - !GetAtt ConfigBucket.Arn
+                  - !Sub ${ConfigBucket.Arn}/*
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:Describe*
+                  - iam:GetRole
+                  - iam:ListRoles
+                Resource: '*'
+
+  # S3 Bucket for AWS Config
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateConfigRecorderResource
+    Properties:
+      BucketName: !Sub ${Environment}-config-bucket-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # AWS Config Delivery Channel
+  ConfigDeliveryChannel:
+    Type: AWS::Config::DeliveryChannel
+    Condition: CreateConfigRecorderResource
+    Properties:
+      Name: !Sub ${Environment}-ConfigDeliveryChannel
+      S3BucketName: !Ref ConfigBucket
+      IncludeGlobalResourceTypes: true
+      FrequencyMinutes: 15
+
+  # AWS Config Configuration Recorder
+  ConfigRecorder:
+    Type: AWS::Config::ConfigurationRecorder
+    Condition: CreateConfigRecorderResource
+    DependsOn: 
+      - ConfigDeliveryChannel
+      - ConfigServiceRole
+    Properties:
+      Name: !Sub ${Environment}-ConfigRecorder
+      RecordingGroup:
+        AllSupported: true
+        IncludeGlobalResourceTypes: true
+      RoleARN: !GetAtt ConfigServiceRole.Arn
+
+  # S3 Bucket Policy for Config
+  ConfigBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateConfigRecorderResource
+    Properties:
+      Bucket: !Ref ConfigBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSConfigBucketPermissionsCheck
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt ConfigBucket.Arn
+          - Sid: AWSConfigBucketDelivery
+            Effect: Allow
+            Principal:
+              Service: config.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${ConfigBucket.Arn}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+  # Security Scanning and Monitoring Resources
+  # AWS Config Rule for EC2 Instance Security
+  EC2InstanceDetailedMonitoringRule:
+    Type: AWS::Config::ConfigRule
+    DependsOn: ConfigRecorder
+    Properties:
+      ConfigRuleName: !Sub ${Environment}-ec2-detailed-monitoring
+      Description: Ensure EC2 instances have detailed monitoring enabled
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_INSTANCE_DETAILED_MONITORING_ENABLED
+
+  # CloudTrail for Audit and Compliance
+  ApplicationCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: AuditLogBucketPolicy
+    Properties:
+      S3BucketName: !Ref AuditLogBucket
+      IsMultiRegionTrail: true
+      IncludeGlobalServiceEvents: true
+      IsLogging: true
+
+  # S3 Bucket Policy for CloudTrail
+  AuditLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt AuditLogBucket.Arn
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub ${AuditLogBucket.Arn}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+Outputs:
+  ConfigBucketName:
+    Description: S3 Bucket for AWS Config
+    Value: !Ref ConfigBucket
+    Condition: CreateConfigRecorderResource
+    Export:
+      Name: !Sub ${Environment}-ConfigBucketName
+
+  ConfigServiceRoleArn:
+    Description: IAM Role for AWS Config Service
+    Value: !GetAtt ConfigServiceRole.Arn
+    Condition: CreateConfigRecorderResource
+    Export:
+      Name: !Sub ${Environment}-ConfigServiceRoleArn

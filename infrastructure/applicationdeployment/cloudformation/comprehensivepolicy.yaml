@@ -1,0 +1,75 @@
+  # Comprehensive IAM Policy for Deployment Role
+  DeploymentRoleFullAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: DeploymentRoleFullAccessPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Service-Linked Role Permissions
+          - Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+              - iam:GetServiceLinkedRoleDeletionStatus
+            Resource: '*'
+          
+          # CloudFormation Permissions
+          - Effect: Allow
+            Action:
+              - cloudformation:*
+            Resource: '*'
+          
+          # EC2 Permissions
+          - Effect: Allow
+            Action:
+              - ec2:*
+            Resource: '*'
+          
+          # IAM Permissions
+          - Effect: Allow
+            Action:
+              - iam:*
+            Resource: '*'
+          
+          # Security Services Permissions
+          - Effect: Allow
+            Action:
+              - guardduty:*
+              - securityhub:*
+              - inspector:*
+              - config:*
+            Resource: '*'
+          
+          # SNS Permissions
+          - Effect: Allow
+            Action:
+              - sns:*
+            Resource: '*'
+          
+          # KMS Permissions
+          - Effect: Allow
+            Action:
+              - kms:*
+            Resource: '*'
+          
+          # Backup Permissions
+          - Effect: Allow
+            Action:
+              - backup:*
+            Resource: '*'
+          
+          # CloudWatch Permissions
+          - Effect: Allow
+            Action:
+              - cloudwatch:*
+              - logs:*
+            Resource: '*'
+          
+          # S3 Permissions
+          - Effect: Allow
+            Action:
+              - s3:*
+            Resource: '*'

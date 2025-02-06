@@ -1,0 +1,1272 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Comprehensive Application Deployment Stack with Advanced Networking, Load Balancing, and Existing Resources'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: 
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Description: CIDR block for the VPC
+
+  PublicSubnet1CIDR:
+    Type: String
+    Default: 10.0.1.0/24
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Description: CIDR block for the first public subnet
+
+  PublicSubnet2CIDR:
+    Type: String
+    Default: 10.0.2.0/24
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Description: CIDR block for the second public subnet
+
+  PrivateSubnet1CIDR:
+    Type: String
+    Default: 10.0.10.0/24
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Description: CIDR block for the first private subnet
+
+  PrivateSubnet2CIDR:
+    Type: String
+    Default: 10.0.11.0/24
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}(/([0-9]|[1-2][0-9]|3[0-2]))$'
+    Description: CIDR block for the second private subnet
+
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    Description: EC2 instance type for application server
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair for SSH access
+
+  MinSize:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Minimum number of instances in the Auto Scaling Group
+
+  MaxSize:
+    Type: Number
+    Default: 6
+    MinValue: 1
+    MaxValue: 10
+    Description: Maximum number of instances in the Auto Scaling Group
+
+  DesiredCapacity:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+    Description: Desired number of instances in the Auto Scaling Group
+
+  AlertEmailAddress:
+    Type: String
+    Default: sougata.rintu@gmail.com
+    AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    Description: Email address for monitoring alerts
+
+  # Security Hub Creation Parameter
+  CreateSecurityHubResource:
+    Type: String
+    Default: 'false'
+    AllowedValues: 
+      - 'true'
+      - 'false'
+    Description: Whether to create a new Security Hub resource (set to false if already subscribed)
+
+  # Latest Amazon Linux 2 AMI Parameter
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+    Description: Latest Amazon Linux 2 AMI ID from SSM Parameter Store
+
+  # SNS Subscription Creation Parameter
+  CreateSNSSubscriptionResource:
+    Type: String
+    Default: 'false'
+    AllowedValues: 
+      - 'true'
+      - 'false'
+    Description: Whether to create new SNS subscriptions (set to false if subscriptions already exist)
+
+  CreateCSVProcessingBucket:
+    Type: String
+    Default: 'false'
+    AllowedValues: 
+      - 'true'
+      - 'false'
+    Description: Whether to create a new CSV Processing S3 Bucket
+
+  CreateApplicationLoadBalancerTargetGroup:
+    Type: String
+    Default: 'false'
+    AllowedValues: 
+      - 'true'
+      - 'false'
+    Description: Whether to create a new Application Load Balancer Target Group
+
+  # Parameters for Inspector Assessment
+  CreateInspectorAssessment:
+    Type: String
+    Default: 'false'
+    AllowedValues: 
+      - 'true'
+      - 'false'
+    Description: Whether to create a new Inspector Assessment
+
+  ExistingInternetGatewayId:
+      Type: String
+      Description: Optional existing Internet Gateway ID
+      Default: ""
+
+# Conditions Block
+Conditions:
+  CreateSecurityHub: !Equals 
+    - !Ref CreateSecurityHubResource
+    - 'true'
+  CreateSNSSubscription: !Equals 
+    - !Ref CreateSNSSubscriptionResource
+    - 'true'
+  CreateCSVProcessingBucketResource: !Equals 
+    - !Ref CreateCSVProcessingBucket
+    - 'true'
+  CreateApplicationLoadBalancerTargetGroupResource: !Equals 
+    - !Ref CreateApplicationLoadBalancerTargetGroup
+    - 'true'
+  UseExistingTargetGroup: !Equals 
+    - !Ref CreateApplicationLoadBalancerTargetGroup
+    - 'false'
+  CreateInspectorAssessmentResource: !Equals 
+    - !Ref CreateInspectorAssessment
+    - 'true'
+  CreateNewInternetGateway: 
+      !Equals 
+        - !Ref ExistingInternetGatewayId
+        - ""
+  UseExistingInternetGateway: 
+    !Not 
+      - !Equals 
+        - !Ref ExistingInternetGatewayId
+        - ""
+
+Resources:
+  # IAM Policy for Budget Management
+  BudgetManagementPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: BudgetManagementPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - budgets:ModifyBudget
+              - budgets:CreateBudget
+              - budgets:DescribeBudget
+              - budgets:DeleteBudget
+            Resource: '*'
+
+  # Granular IAM Policies for Deployment Role
+  
+  # CloudFormation Deployment Policy
+  CloudFormationDeploymentPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CloudFormationDeploymentPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudformation:CreateStack
+              - cloudformation:UpdateStack
+              - cloudformation:DeleteStack
+              - cloudformation:DescribeStacks
+              - cloudformation:ListStacks
+              - cloudformation:ValidateTemplate
+            Resource: '*'
+  
+  # VPC and Networking Policy
+  VPCNetworkingPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: VPCNetworkingPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:CreateVpc
+              - ec2:DeleteVpc
+              - ec2:DescribeVpcs
+              - ec2:CreateSubnet
+              - ec2:DeleteSubnet
+              - ec2:DescribeSubnets
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:DescribeSecurityGroups
+            Resource: '*'
+  
+  # Security Services Policy
+  SecurityServicesPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SecurityServicesPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - guardduty:CreateDetector
+              - guardduty:DeleteDetector
+              - guardduty:UpdateDetector
+              - securityhub:CreateHub
+              - securityhub:DeleteHub
+              - inspector:CreateAssessmentTarget
+              - inspector:DeleteAssessmentTarget
+              - config:PutConfigRule
+              - config:DeleteConfigRule
+            Resource: '*'
+  
+  # KMS and Encryption Policy
+  KMSEncryptionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: KMSEncryptionPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:CreateKey
+              - kms:CreateAlias
+              - kms:DeleteAlias
+              - kms:EnableKey
+              - kms:DisableKey
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: '*'
+  
+  # Backup and Disaster Recovery Policy
+  BackupDisasterRecoveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: BackupDisasterRecoveryPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - backup:CreateBackupVault
+              - backup:DeleteBackupVault
+              - backup:CreateBackupPlan
+              - backup:DeleteBackupPlan
+              - backup:StartBackupJob
+              - backup:StopBackupJob
+              - backup:CreateReportPlan
+              - backup:DeleteReportPlan
+            Resource: '*'
+  
+  # SNS Notification Policy
+  SNSNotificationPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SNSNotificationPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:CreateTopic
+              - sns:DeleteTopic
+              - sns:Subscribe
+              - sns:Unsubscribe
+              - sns:Publish
+            Resource: '*'
+  
+  # Service-Linked Role Creation Policy
+  ServiceLinkedRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ServiceLinkedRoleCreationPolicy
+      Roles: 
+        - !Ref DeploymentRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+              - iam:GetServiceLinkedRoleDeletionStatus
+            Resource: 
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*
+            Condition:
+              StringLike:
+                iam:AWSServiceName:
+                  - guardduty.amazonaws.com
+                  - backup.amazonaws.com
+                  - inspector.amazonaws.com
+
+  # IAM Role for Deployment
+  DeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ApplicationDeploymentRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - cloudformation.amazonaws.com
+                - ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+
+  # VPC and Networking Resources
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Application-VPC
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Internet Gateway Resource (Conditional)
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-InternetGateway
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Attach Internet Gateway to VPC
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Custom Resource to Trigger Lambda for Internet Gateway Attachment
+  # TriggerInternetGatewayAttachment:
+  #   Type: AWS::CloudFormation::CustomResource
+  #   Properties:
+  #     ServiceToken: !GetAtt AttachInternetGatewayLambda.Arn
+  #     VpcId: !Ref VPC
+  #     InternetGatewayId: !Ref InternetGateway
+
+  # Fallback Lambda for Complex Attachment Scenarios
+  AttachInternetGatewayLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt AttachInternetGatewayLambdaRole.Arn
+      Runtime: python3.8
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+              try:
+                  ec2 = boto3.client('ec2')
+                  vpc_id = event['ResourceProperties']['VpcId']
+                  igw_id = event['ResourceProperties']['InternetGatewayId']
+
+                  logger.info(f"Processing event: {event['RequestType']}")
+                  logger.info(f"VPC ID: {vpc_id}, IGW ID: {igw_id}")
+
+                  if event['RequestType'] in ['Create', 'Update']:
+                      # Detailed logging for troubleshooting
+                      try:
+                          # Check existing attachments
+                          existing_attachments = ec2.describe_internet_gateways(
+                              Filters=[
+                                  {'Name': 'attachment.vpc-id', 'Values': [vpc_id]}
+                              ]
+                          )
+                          logger.info(f"Existing Attachments: {existing_attachments}")
+
+                          # Detach existing gateways if needed
+                          for gw in existing_attachments['InternetGateways']:
+                              for attachment in gw.get('Attachments', []):
+                                  if attachment['VpcId'] == vpc_id:
+                                      logger.info(f"Detaching existing IGW: {gw['InternetGatewayId']}")
+                                      ec2.detach_internet_gateway(
+                                          InternetGatewayId=gw['InternetGatewayId'],
+                                          VpcId=vpc_id
+                                      )
+
+                      except Exception as list_error:
+                          logger.error(f"Error checking existing attachments: {list_error}")
+
+                      # Attach new Internet Gateway
+                      try:
+                          ec2.attach_internet_gateway(
+                              InternetGatewayId=igw_id,
+                              VpcId=vpc_id
+                          )
+                          logger.info(f"Successfully attached IGW {igw_id} to VPC {vpc_id}")
+                      except Exception as attach_error:
+                          logger.error(f"Attachment error: {attach_error}")
+                          raise
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS)
+              except Exception as e:
+                  logger.error(f"Fatal error: {e}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  # IAM Role for Lambda Function
+  AttachInternetGatewayLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AttachInternetGatewayPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:AttachInternetGateway
+                  - ec2:DetachInternetGateway
+                  - ec2:DescribeInternetGateways
+                  - ec2:CreateInternetGateway
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Public-Subnet-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Public-Subnet-2
+
+  # Private Subnets
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Private-Subnet-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Private-Subnet-2
+
+  # Public Route Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Public-RT
+
+  # Public Route to Internet Gateway
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Associate Public Subnets with Public Route Table
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # NAT Gateway for Private Subnets
+  NATGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+
+  NATGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  # Private Route Table
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Private-RT-1
+
+  # Private Route to NAT Gateway
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway1
+
+  # Associate Private Subnets with Private Route Table
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable1
+
+  # Existing Security Group for Application Server
+  ApplicationServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Spring Boot and Tomcat application server
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  # Existing S3 Bucket for CSV Processing
+  CSVProcessingBucket:
+    Type: AWS::S3::Bucket
+    # Condition: CreateCSVProcessingBucketResource
+    Properties:
+      BucketName: !Sub ${Environment}-csv-processing-bucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+
+  # Existing IAM Role for EC2 Instance
+  ApplicationServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub ${CSVProcessingBucket.Arn}
+                  - !Sub ${CSVProcessingBucket.Arn}/*
+
+  # Instance Profile for IAM Role
+  ApplicationServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ApplicationServerRole
+
+  # Launch Template for Auto Scaling
+  ApplicationServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${Environment}-Application-Launch-Template
+      VersionDescription: Initial version of application server launch template
+      LaunchTemplateData:
+        ImageId: ami-0cff7528ff583bf9a  # Amazon Linux 2 AMI
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds: 
+          - !Ref ApplicationServerSecurityGroup
+        IamInstanceProfile:
+          Name: !Ref ApplicationServerInstanceProfile
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            # Install dependencies and configure application
+            yum update -y
+            amazon-linux-extras install java-11-amazon-corretto -y
+            yum install -y tomcat
+            systemctl start tomcat
+            systemctl enable tomcat
+
+  # Auto Scaling Group
+  ApplicationServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: 
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ApplicationServerLaunchTemplate
+        Version: !GetAtt ApplicationServerLaunchTemplate.LatestVersionNumber
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      TargetGroupARNs:
+        - !Ref ApplicationLoadBalancerTargetGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${Environment}-Application-Server
+          PropagateAtLaunch: true
+
+  # Application Load Balancer
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${Environment}-ApplicationLoadBalancer
+      Scheme: internet-facing
+      SecurityGroups: 
+        - !Ref LoadBalancerSecurityGroup
+      Subnets: 
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Load Balancer Target Group
+  ApplicationLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${Environment}-Application-TG
+      VpcId: !Ref VPC
+      Port: 8080
+      Protocol: HTTP
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: "200"
+
+  # Load Balancer Listener
+  ApplicationLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ApplicationLoadBalancerTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # Security Group for Load Balancer
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+
+  # Auto Scaling Policies and Scaling Alarms
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref ApplicationServerAutoScalingGroup
+      Cooldown: 300
+      ScalingAdjustment: 1
+
+  ScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref ApplicationServerAutoScalingGroup
+      Cooldown: 300
+      ScalingAdjustment: -1
+
+  # Existing Monitoring Resources
+  ApplicationServerCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: CPU utilization is high
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      AlarmActions: 
+        - !Ref MonitoringSnsTopic
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref ApplicationServerAutoScalingGroup
+
+  # Existing SNS Topic for Monitoring Alerts
+  MonitoringSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${Environment}-application-monitoring-alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmailAddress
+          Protocol: email
+
+  # Existing CloudWatch Dashboard
+  ApplicationMonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${Environment}-Application-Monitoring
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/EC2", "CPUUtilization", "AutoScalingGroupName", "${ApplicationServerAutoScalingGroup}" ],
+                  [ ".", "NetworkIn", ".", "." ],
+                  [ ".", "NetworkOut", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "EC2 Performance Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/S3", "BucketSizeBytes", "BucketName", "${CSVProcessingBucket}" ],
+                  [ ".", "NumberOfObjects", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "S3 Bucket Metrics"
+              }
+            }
+          ]
+        }
+
+  # Existing Cost Management Resources
+  # Cost Budget
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub ${Environment}-Monthly-Cost-Budget
+        BudgetLimit:
+          Amount: 500
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+        CostFilters: 
+          LinkedAccount: 
+            - !Ref AWS::AccountId
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmailAddress
+
+  # AWS GuardDuty Detector
+  GuardDutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Properties:
+      Enable: true
+      FindingPublishingFrequency: FIFTEEN_MINUTES
+      DataSources:
+        S3Logs:
+          Enable: true
+        Kubernetes:
+          AuditLogs:
+            Enable: true
+
+  # Inspector Assessment Target
+  InspectorAssessmentTarget:
+    Type: AWS::Inspector::AssessmentTarget
+    Condition: CreateInspectorAssessmentResource
+    Properties:
+      AssessmentTargetName: !Sub ${Environment}-application-server-target
+
+  # Inspector Assessment Template
+  InspectorAssessmentTemplate:
+    Type: AWS::Inspector::AssessmentTemplate
+    Condition: CreateInspectorAssessmentResource
+    Properties:
+      AssessmentTargetArn: !GetAtt InspectorAssessmentTarget.Arn
+      DurationInSeconds: 3600
+      AssessmentTemplateName: !Sub ${Environment}-application-server-assessment
+      RulesPackageArns: 
+        - !Sub arn:aws:inspector:${AWS::Region}:${AWS::AccountId}:rulespackage/0-K5EqSBEA
+        - !Sub arn:aws:inspector:${AWS::Region}:${AWS::AccountId}:rulespackage/0-JJOtZiqQ
+        - !Sub arn:aws:inspector:${AWS::Region}:${AWS::AccountId}:rulespackage/0-vg5GGHSD
+
+  # Security Hub Resource with Conditional Creation
+  SecurityHub:
+    Type: AWS::SecurityHub::Hub
+    Condition: CreateSecurityHub
+    Properties: {}
+
+  # SNS Topic for Security Notifications
+  SecurityNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${Environment}-security-notifications
+      Subscription:
+        - Endpoint: !Ref AlertEmailAddress
+          Protocol: email
+
+  # CloudWatch Event Rule for GuardDuty Findings
+  GuardDutyFindingsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${Environment}-guardduty-findings
+      Description: Capture GuardDuty findings and send to SNS
+      EventPattern:
+        source:
+          - aws.guardduty
+        detail-type:
+          - GuardDuty Finding
+      State: ENABLED
+      Targets:
+        - Arn: !Ref SecurityNotificationTopic
+          Id: SendToSNS
+
+  # Disaster Management and Backup Resources
+  # AWS Backup Vault
+  DisasterRecoveryBackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub ${Environment}-disaster-recovery-vault
+      EncryptionKeyArn: !GetAtt BackupVaultEncryptionKey.Arn
+
+  # KMS Key for Backup Vault Encryption
+  BackupVaultEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS Key for Backup Vault Encryption
+      Enabled: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: 
+              - kms:*
+            Resource: '*'
+          
+          - Sid: Allow AWS Services Access
+            Effect: Allow
+            Principal:
+              Service: 
+                - backup.amazonaws.com
+                - kms.amazonaws.com
+                - sns.amazonaws.com
+            Action: 
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:CreateGrant
+              - kms:DescribeKey
+              - kms:ListGrants
+              - kms:RevokeGrant
+            Resource: '*'
+            Condition:
+              StringEquals:
+                kms:CalledBy: 
+                  - backup.amazonaws.com
+                  - kms.amazonaws.com
+                  - sns.amazonaws.com
+
+  # KMS Key Alias for Backup Vault Encryption
+  BackupVaultEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${Environment}-backup-vault-key
+      TargetKeyId: !Ref BackupVaultEncryptionKey
+
+  # Disaster Recovery Notification Topic
+  DisasterRecoveryNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${Environment}-disaster-recovery-alerts
+      KmsMasterKeyId: !Ref BackupVaultEncryptionKey
+
+  # Disaster Recovery Notification Topic Subscription
+  DisasterRecoveryNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CreateSNSSubscription
+    Properties:
+      TopicArn: !Ref DisasterRecoveryNotificationTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmailAddress
+
+  # Backup Plan for EC2 Instances
+  EC2BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub ${Environment}-ec2-backup-plan
+        BackupPlanRule:
+          - RuleName: DailyBackups
+            TargetBackupVault: !Ref DisasterRecoveryBackupVault
+            ScheduleExpression: "cron(0 5 ? * * *)"
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 120
+            Lifecycle:
+              DeleteAfterDays: 30
+
+
+  # Backup Selection for EC2 Instances
+  EC2BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref EC2BackupPlan
+      BackupSelection:
+        SelectionName: EC2InstanceBackup
+        IamRoleArn: !GetAtt BackupServiceRole.Arn
+        Resources:
+          - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+
+  # S3 Cross-Region Replication Role
+  S3CrossRegionReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3CrossRegionReplicationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetReplicationConfiguration
+                  - s3:ListBucket
+                Resource: !GetAtt CSVProcessingBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObjectVersion
+                  - s3:GetObjectVersionAcl
+                Resource: !Sub ${CSVProcessingBucket.Arn}/*
+
+  # Cross-Region Replication Configuration for S3
+  S3CrossRegionReplicationConfiguration:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CSVProcessingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CrossRegionReplicationPolicy
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt S3CrossRegionReplicationRole.Arn
+            Action:
+              - s3:ReplicateObject
+              - s3:ReplicateDelete
+            Resource: !Sub ${CSVProcessingBucket.Arn}/*
+
+  # Disaster Recovery Simulation CloudWatch Alarm
+  DisasterRecoverySimulationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Simulate Disaster Recovery Scenario
+      MetricName: HealthHostStatus
+      Namespace: AWS/EC2
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0
+      AlarmActions: 
+        - !Ref DisasterRecoveryNotificationTopic
+      ComparisonOperator: LessThanOrEqualToThreshold
+
+  # Disaster Recovery Notification Topic
+  DisasterRecoveryNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${Environment}-disaster-recovery-alerts
+      Subscription:
+        - Endpoint: !Ref AlertEmailAddress
+          Protocol: email
+
+  # Backup Service IAM Role
+  BackupServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+  # Backup Vault Resource
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub "${Environment}-backup-vault"
+      EncryptionKeyArn: !GetAtt BackupVaultEncryptionKey.Arn
+
+  # Primary EC2 Instance for Backup and Disaster Recovery
+  PrimaryEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.medium
+      SubnetId: !Ref PrivateSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-primary-instance"
+
+Outputs:
+
+  # Deployment Role Output
+  DeploymentRoleArn:
+    Description: ARN of the Deployment Role
+    Value: !GetAtt DeploymentRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-DeploymentRole-ARN
+
+  # Existing Network Outputs
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${Environment}-VPC-ID
+
+  PublicSubnet1:
+    Description: Public Subnet 1
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${Environment}-Public-Subnet-1
+
+  PublicSubnet2:
+    Description: Public Subnet 2
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub ${Environment}-Public-Subnet-2
+
+  PrivateSubnet1:
+    Description: Private Subnet 1
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${Environment}-Private-Subnet-1
+
+  PrivateSubnet2:
+    Description: Private Subnet 2
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub ${Environment}-Private-Subnet-2
+
+  # Load Balancer Outputs
+  ApplicationLoadBalancerDNSName:
+    Description: DNS Name of the Application Load Balancer
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  # Auto Scaling Group Outputs
+  AutoScalingGroupName:
+    Description: Name of the Auto Scaling Group
+    Value: !Ref ApplicationServerAutoScalingGroup
+
+  # Existing Outputs
+  CSVProcessingBucketName:
+    Description: S3 Bucket for CSV Processing
+    Value: !Ref CSVProcessingBucket
+
+  # Monitoring Outputs
+  MonitoringSNSTopicArn:
+    Description: SNS Topic for Monitoring Alerts
+    Value: !Ref MonitoringSnsTopic
+
+  CloudWatchDashboardName:
+    Description: CloudWatch Dashboard for Application Monitoring
+    Value: !Ref ApplicationMonitoringDashboard
+
+  CostBudgetName:
+    Description: Monthly Cost Budget Name
+    Value: !Ref CostBudget
+
+  GuardDutyDetectorId:
+    Description: GuardDuty Detector ID
+    Value: !Ref GuardDutyDetector
+
+  SecurityHubStatus:
+    Description: Security Hub Status
+    Value: Enabled
+
+  SecurityNotificationTopicArn:
+      Description: Security Notification Topic ARN
+      Value: !Ref SecurityNotificationTopic
+      Export:
+        Name: !Sub "${AWS::StackName}-SecurityNotificationTopicArn"
+
+  DisasterRecoveryBackupVaultName:
+    Description: Disaster Recovery Backup Vault Name
+    Value: !Ref DisasterRecoveryBackupVault
+
+  DisasterRecoveryNotificationTopicArn:
+      Description: Disaster Recovery Notification Topic ARN
+      Value: !Ref DisasterRecoveryNotificationTopic
+      Export:
+        Name: !Sub "${AWS::StackName}-DisasterRecoveryNotificationTopicArn"
+
+  BackupVaultName:
+      Description: Name of the Backup Vault
+      Value: !Ref BackupVault
+      Export:
+        Name: !Sub "${AWS::StackName}-BackupVaultName"
+
+  # Primary Resource ARN Output
+  PrimaryResourceArn:
+    Description: ARN of the Primary Resource for Backup
+    Value: !Ref PrimaryEC2Instance
+    Export:
+      Name: !Sub "${AWS::StackName}-PrimaryResourceArn"
